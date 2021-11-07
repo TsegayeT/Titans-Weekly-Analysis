@@ -1,0 +1,422 @@
+library(tidyverse)
+library(ggrepel)
+library(ggimage)
+library(nflfastR)
+library(gt) 
+library(paletteer) 
+library(dplyr)
+library(nflreadr)
+library(DataCombine)
+library(nflplotR)
+library(ggtext)
+library(ggthemes)
+library(extrafont)
+library(glue)
+library(ggdist)
+library(gtExtras)
+remotes::install_github("jthomasmock/gtExtras")
+install.packages("remotes")
+install.packages("ggdist")
+install.packages("nflplotR")
+install.packages("paletteer")
+install.packages("DataCombine")
+install.packages("nflreadr")
+if (!require("remotes")) install.packages("remotes")
+remotes::install_github("nflverse/nflplotR")
+
+
+
+data <- load_pbp(2021)
+
+
+##################################################################  TITANS VS DIVISION #################################
+
+
+QB_Hits <- data %>%filter(posteam == "TEN" | posteam =="LA", play_type == "pass"
+                     | play_type == "run") %>%
+  group_by(posteam, week) %>% 
+  summarise(hits = sum(qb_hit), total_success_series = sum(series_success)) 
+
+
+   
+QB_Hits %>% 
+  ggplot(aes(x=week, y = hits, 
+             color = if_else(posteam == "TEN", ten_primary_color, opp_primary_color)))+
+  geom_point()+
+  stat_smooth(method = "lm", se=FALSE, size = 1)+
+  scale_color_identity()+
+  facet_wrap(~posteam)+
+  theme_economist()+
+  scale_x_continuous(breaks = seq(1,14,1))+
+  scale_y_continuous(breaks = seq(0,14,2))+
+  labs(
+    x = "Week",
+    y= "Total Hits",
+    title = glue::glue("QB Hits by Week for <span style= 'color:
+                       {ten_primary_color}'>**LA**</span> and 
+                       <span style = 'color:{opp_primary_color}'>**TEN**</span>"),
+    caption = "Data:nflfastR; plot:@_ThomasT")+
+  theme(plot.title = element_markdown(hjust = 0.5))
+
+
+
+
+
+
+
+####################################################################################################################
+                            ########################## TITANS VS OPP DEFENSE ###############################
+
+
+Titans_V_pass_defense <-  data %>% filter(
+                                          play_type == "pass"| play_type =="run") %>% 
+  group_by(defteam, qb_dropback) %>% 
+  summarize(epa = mean(epa))
+
+
+
+Titans_V_pass_defense <- Titans_V_pass_defense %>% 
+  mutate(play_type = 
+           case_when(
+             qb_dropback == 0 ~ "run",
+             qb_dropback == 1 ~ "pass"
+           ))
+
+
+Titans_V_pass_defense = subset(Titans_V_pass_defense, select = -c(qb_dropback))
+
+Titans_V_pass_defense <- Titans_V_pass_defense %>% 
+  pivot_wider(names_from = play_type, values_from = epa)
+
+
+
+
+Titans_V_pass_defense <- Titans_V_pass_defense %>% 
+  left_join(nflfastR::teams_colors_logos, by = c("defteam" = "team_abbr"))
+
+asp_ratio <- 1.9
+
+Titans_V_pass_defense %>% ggplot(aes(x = run, y= pass))+
+  geom_image(aes(image = team_logo_wikipedia), size = 0.04, asp = asp_ratio,
+             alpha = 0.7)
+
+
+
+
+
+
+Titans_V_pass_defense %>% 
+  ##select(Defensive Team = defteam,Run = run, Pass= pass ) %>%
+  group_by(defteam) %>% 
+  arrange(pass) %>% 
+  gt(
+    rowname_col = "row",
+    groupname_col = "group"
+  )%>% 
+  cols_move(
+    columns = run,
+    after = pass
+  ) %>% 
+  tab_options(
+    table.width = px(500) 
+  ) %>% 
+  data_color(
+    columns = c(pass, run),
+    colors = scales::col_numeric(
+      # custom defined values - notice that order matters!
+      palette = c( "#7fbf7b", "#f7f7f7", "#af8dc3"),
+      domain = NULL
+    )
+  ) %>% 
+  gt_highlight_rows(
+    rows = c(9,11), fill = "yellow"
+  ) %>% 
+  tab_header(title =md("**EPA Per Play by Pass & Rush Defense**")) %>% 
+  fmt_number(
+    columns = 2:3,
+    decimals = 3
+  ) %>% 
+  gt::cols_align(
+    align = "center",
+    columns = c(pass, run)
+  ) %>% 
+  cols_label(
+  defteam = "Defensive Team",
+  run = "Run Defense",
+  pass = "Pass Defense"
+) %>% 
+  gt_theme_538() %>% 
+  opt_row_striping() %>% 
+  tab_source_note(source_note = md("Source: data:nflfastR; plot:@_ThomasT"))%>% 
+  gtsave("Titans_V_pass_defense.png") 
+
+
+webshot::install_phantomjs()
+
+
+#################################################################################
+############################ TRENCH DEFENSE #####################################
+
+
+trenches_D <- c("PRWR", "RSWR")
+trenches_Titans_D <- c("0.44(13)", "0.32(9)")
+trenches_OPP_D <- c("0.59(2)", "0.32(6)")
+
+
+trenches_D_Comparison <- data.frame(trenches_D, trenches_Titans_D, trenches_OPP_D)
+
+
+colnames(trenches_D_Comparison) <- c("Playtype", "Titans", "Rams")
+
+
+trenches_D_Comparison %>% 
+  group_by(Playtype) %>% 
+  gt(rowname_col = "row",
+     groupname_col = "group") %>% 
+  tab_header(
+    title = md("**Pass Rush & Run Stop Win Rate**") 
+  ) %>% 
+  tab_options(
+    table.border.top.color = "black",
+    column_labels.border.bottom.color = "black",
+    column_labels.border.bottom.width = px(3)
+  ) %>% 
+  tab_style(style = list(
+    cell_text(weight= "bold")
+  ),locations = cells_column_labels(everything())
+  ) %>% 
+  tab_source_note("Table: @_ThomasT; Data: @nflfastR"
+  ) %>% 
+  gtsave("PRWR_RSWR.png")
+
+
+
+
+
+
+
+#################################################################################
+############################# OFFENSE #########################################
+
+
+
+############################### Tanny V Opp QB ############################################
+
+
+
+##################################### QB BATTLE ################################
+
+ten_colors <- nflfastR::teams_colors_logos %>% 
+  filter(team_abbr == "TEN")
+
+Opp_colors <- nflfastR::teams_colors_logos %>% 
+  filter(team_abbr == "LAR")
+
+ten_primary_color <- pull(ten_colors, team_color2)
+opp_primary_color <- pull(Opp_colors, team_color4)
+
+data %>% filter(name == "R.Tannehill" | name == "M.Stafford", down <=4, 
+                   !is.na(epa),qb_dropback ==1) %>% 
+  group_by(name, week) %>% 
+  summarise(mean_epa = mean(epa)) %>%
+  select(name, week, mean_epa) %>% 
+  ggplot(aes(x = week, y = mean_epa, 
+             color = if_else(name == "R.Tannehill", ten_primary_color, opp_primary_color)))+
+  geom_point(size = 2.9)+
+  stat_smooth(method = "lm", alpha = 0.5, se = FALSE, geom = "line", size =1)+
+  scale_color_identity()+
+  #scale_color_manual(values = c(ten_colors, Opp_colors))+
+  #theme_fivethirtyeight()+
+  geom_hline(yintercept = 0, size = 1, color = "black")+
+  scale_x_continuous(breaks = seq(1,8,1))+
+  scale_y_continuous(breaks = seq(-0.4, 0.75, 0.15))+
+  theme_economist()+
+  labs(
+    x = "Week",
+    y = "EPA/Play",
+    title = glue::glue("EPA Per Play By Week For <span style= 'color:
+                       {ten_primary_color}'>**Tannehill**</span> and 
+                       <span style = 'color:{opp_primary_color}'>**Stafford**</span>"),
+    caption = "Data:nflfastR; plot:@_ThomasT")+
+  theme(plot.title = element_markdown(hjust = 0.5))+
+  facet_wrap(~name)
+  
+
+###############################################################################
+
+
+Titans_vs <- data %>% 
+  filter(game_id =="2021_03_IND_TEN", play_type == "pass"
+                             | play_type == "run") %>%
+  group_by(posteam, qb_dropback) %>% 
+  select(posteam, qb_dropback, name, epa, play_type) %>% 
+  summarise(epa = mean(epa))
+
+colnames(Titans_vs) <- c("Team", "PlayType", "EPA")
+Titans_vs[,2] <- c("Run", "Pass", "Run", "Pass")
+  
+Titans_vs %>% 
+  ggplot(aes(x = Team, y= EPA, position = "dodge", group = PlayType))+
+  geom_col()+
+  facet_grid(~PlayType)+
+  geom_hline(yintercept = 0, color = "black", size= 2)
++
+  scale_fill_manual(values = c( team_colors$team_color, Opp_colors$team_color))
+  
+
+
+team_colors <- nflfastR::teams_colors_logos %>% 
+  filter(team_abbr == "TEN")
+
+Opp_colors <- nflfastR::teams_colors_logos %>% 
+  filter(team_abbr == "IND")
+
+
+colnames(Titans_V_pass_defense) <- c("Playtype", "Bills", "Titans")
+Titans_V_pass_defense<- Titans_V_pass_defense[c(2, 1), c("Playtype", "Titans", "Bills")]
+
+
+Titans_V_pass_defense <- round_df(Titans_V_pass_defense, 3)
+
+
+
+
+
+
+############################################################################################################
+                  #################################### TITANS    V OFFENSE #####################
+                  
+Titans_V_Offense <- data %>% filter(
+                                    play_type == "pass" | play_type == "run",
+                                    down<= 4, !is.na(epa)) %>% 
+  group_by(posteam, play_type) %>% 
+  select(epa, posteam, desc, name,  qb_dropback, pass)
+
+
+
+#fixed_Titans_V_Offense <- Titans_V_Offense %>% 
+ # mutate(
+  #  pass = case_when(
+    #  name == "R.Tannehill" | name == "J.Allen" ~ "pass",
+     # name != "R.Tannehill" | name == "J.Allen" ~ "run"
+   # )
+ # )
+
+Titans_v_Buf <- Titans_V_Offense %>% 
+  group_by(posteam, qb_dropback) %>% 
+  summarize(epa = mean(epa))
+
+Titans_v_Buf <- Titans_v_Buf %>% 
+  pivot_wider(names_from =  qb_dropback, values_from = epa)
+
+colnames(Titans_v_Buf) <- c("Offense", "Run EPA", "Pass EPA")
+
+
+
+Titans_v_Buf %>% 
+  group_by(Offense) %>% 
+  arrange(desc(`Pass EPA`)) %>% 
+  gt(rowname_col = "row",
+     groupname_col = "group") %>% 
+  cols_move(columns = `Run EPA`,
+            after = `Pass EPA`) %>%
+  gt_highlight_rows(rows = c(1,14), fill = "yellow") %>% 
+  tab_options(
+    table.width = px(500) 
+  ) %>% 
+  data_color(columns = c(`Pass EPA`, `Run EPA`), 
+             colors = scales::col_numeric(palette = c( "#af8dc3", "#f7f7f7","#7fbf7b"),
+                                          domain = NULL)) %>% 
+  tab_header(title = md("**Offensive EPA Per Play**")) %>% 
+  fmt_number(columns = 2:3, decimals = 3) %>% 
+  gt::cols_align(align = "center",
+                 columns = c(`Pass EPA`, `Run EPA` )) %>% 
+  gt_theme_538() %>% 
+  opt_row_striping() %>% 
+  gtsave("Off_EPA_Play.png")
+
+
+
+
+Titans_V_pass_defense %>% 
+  ##select(Defensive Team = defteam,Run = run, Pass= pass ) %>%
+  group_by(defteam) %>% 
+  arrange(pass) %>% 
+  gt(
+    rowname_col = "row",
+    groupname_col = "group"
+  )%>% 
+  cols_move(
+    columns = run,
+    after = pass
+  ) %>% 
+  tab_options(
+    table.width = px(500) 
+  ) %>% 
+  data_color(
+    columns = c(pass, run),
+    colors = scales::col_numeric(
+      # custom defined values - notice that order matters!
+      palette = c( "#7fbf7b", "#f7f7f7", "#af8dc3"),
+      domain = NULL
+    )
+  ) %>% 
+  gt_highlight_rows(
+    rows = c(9,11), fill = "yellow"
+  ) %>% 
+  tab_header(title =md("**EPA Per Play by Pass & Rush Defense**")) %>% 
+  fmt_number(
+    columns = 2:3,
+    decimals = 3
+  ) %>% 
+  gt::cols_align(
+    align = "center",
+    columns = c(pass, run)
+  ) %>% 
+  cols_label(
+    defteam = "Defensive Team",
+    run = "Run Defense",
+    pass = "Pass Defense"
+  ) %>% 
+  gt_theme_538() %>% 
+  opt_row_striping() %>% 
+  tab_source_note(source_note = md("Source: data:nflfastR; plot:@_ThomasT"))%>% 
+  gtsave("Titans_V_pass_defense.png") 
+
+
+
+############################################################################################################
+############################################################################################################
+
+trenches_type <- c("PBWR", "RBWR")
+trenches_Titans<- c("0.60(13)", "0.69(20)")
+trenches_Bills <- c("0.67(4)", "0.72(10)")
+
+trenches_Comparison <- data.frame(trenches_type, trenches_Titans, trenches_Bills)
+
+
+colnames(trenches_Comparison) <- c("Playtype", "Titans", "Rams")
+
+trenches_Comparison$Play_Type = c("Offense", "Offense","Defense","Defense")
+
+
+### Oline Table####
+trenches_Comparison %>% 
+  group_by(Playtype) %>% 
+  gt(rowname_col = "row",
+     groupname_col = "group") %>% 
+  tab_header(
+    title = md("**Pass Block & Run Block Win Rate**") 
+  ) %>% 
+  tab_options(
+    table.border.top.color = "black",
+    column_labels.border.bottom.color = "black",
+    column_labels.border.bottom.width = px(3)
+  ) %>% 
+  tab_style(style = list(
+    cell_text(weight= "bold")
+  ),locations = cells_column_labels(everything())
+  ) %>% 
+  tab_source_note("Table: @_ThomasT; Data: @nflfastR"
+  ) %>% 
+  gtsave("PBWR_RBWR.png")
